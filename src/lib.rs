@@ -132,7 +132,7 @@ impl<T, P> Drop for InfVec<T, P> {
 
 impl<T, P> InfVecInner<T, P> {
     fn index_ptr(&self, i: usize) -> *const MaybeUninit<T> {
-        let chunk = &self.cached_chunks[i / CHUNK_SIZE];
+        let chunk = self.cached_chunks[i / CHUNK_SIZE];
         // We do this janky way to avoid creating a reference to the chunk,
         // since someone else might be holding a reference into the chunk.
         let first_element_ptr = chunk.as_ptr() as *const MaybeUninit<T>;
@@ -141,7 +141,7 @@ impl<T, P> InfVecInner<T, P> {
     }
 
     fn index_ptr_mut(&mut self, i: usize) -> *mut MaybeUninit<T> {
-        let chunk = &self.cached_chunks[i / CHUNK_SIZE];
+        let chunk = self.cached_chunks[i / CHUNK_SIZE];
         // We do this janky way to avoid creating a reference to the chunk,
         // since someone else might be holding a reference into the chunk.
         let first_element_ptr = chunk.as_ptr().cast::<MaybeUninit<T>>();
