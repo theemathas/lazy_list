@@ -72,11 +72,13 @@ impl<I: Iterator> Producer<I::Item> for IteratorProducer<I> {
 /// a `Vec`. Instead, it stores elements in 64-element chunks. This is so that
 /// we can hand out references to elements, and not have them be invalidated as
 /// more elements are added to the cache.
+///
+/// If you don't want to specify a producer type as a type parameter, you can
+/// use the [`InfVecBoxed`] type alias.
 pub struct InfVec<T, P>(RefCell<InfVecInner<T, P>>);
 
-// TODO docs
-// TODO tests
-pub type InfVecBoxed<T> = InfVec<T, Box<dyn Producer<T>>>;
+/// A type alias for an [`InfVec`] with a boxed [`Producer`] for convenience.
+pub type InfVecBoxed<T> = InfVec<T, Box<dyn Producer<T> + 'static>>;
 
 type Chunk<T> = NonNull<[MaybeUninit<T>; CHUNK_SIZE]>;
 
@@ -178,6 +180,23 @@ impl<I: Iterator> InfVec<I::Item, IteratorProducer<I>> {
     }
 }
 
+impl<T> InfVecBoxed<T> {
+    /// Creates an [`InfVecBoxed`] from a closure. The function boxes the
+    /// closure for you. The resulting `InfVecBoxed` is conceptually initialized
+    /// by values from successive calls to the closure.
+    pub fn boxed_from_fn(f: impl FnMut() -> T + 'static) -> Self {
+        Self::new(Box::new(FnMutProducer(f)))
+    }
+
+    /// Creates an [`InfVecBoxed`] from an iterator. The function boxes the
+    /// iterator for you. The resulting `InfVec` conceptually contains the
+    /// stream of elements produced by the iterator. Operations on the resulting
+    /// `InfVecBoxed` might panic if the iterator is not infinite.
+    pub fn boxed_from_infinite_iter(iter: impl Iterator<Item = T> + 'static) -> Self {
+        Self::new(Box::new(IteratorProducer(iter)))
+    }
+}
+
 impl<T, P: Producer<T>> InfVec<T, P> {
     /// Ensures that element `i` is cached.
     fn ensure_cached(&self, i: usize) {
@@ -265,6 +284,26 @@ mod tests {
         }
         for i in 0..200 {
             assert_eq!(vec[i], 10 * i);
+        }
+    }
+
+    #[test]
+    fn test_boxed_from_fn() {
+        let mut x = 0;
+        let vec: InfVecBoxed<_> = InfVecBoxed::boxed_from_fn(move || {
+            x += 1;
+            x
+        });
+        for i in 0..100 {
+            assert_eq!(vec[i], i + 1);
+        }
+    }
+
+    #[test]
+    fn test_boxed_from_infinite_iter() {
+        let vec: InfVecBoxed<_> = InfVecBoxed::boxed_from_infinite_iter((0..).map(|x| x * x));
+        for i in 0..100 {
+            assert_eq!(vec[i], i * i);
         }
     }
 }
