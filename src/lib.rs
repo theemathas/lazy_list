@@ -149,8 +149,8 @@ impl<T, P> InfVec<T, P> {
     /// Creates a new `InfVec` with the given producer. The resulting `InfVec`
     /// is conceptually initialized by values from successive calls to
     /// [produce](Producer::produce).
-    pub const fn new(producer: P) -> Self {
-        Self(RefCell::new(InfVecInner {
+    pub const fn new(producer: P) -> InfVec<T, P> {
+        InfVec(RefCell::new(InfVecInner {
             cached_chunks: Vec::new(),
             num_cached: 0,
             producer,
@@ -166,8 +166,8 @@ impl<T, P> InfVec<T, P> {
 impl<T, F: FnMut() -> T> InfVec<T, FnMutProducer<F>> {
     /// Creates a new `InfVec` from a closure. The resulting `InfVec` is
     /// conceptually initialized by values from successive calls to the closure.
-    pub fn from_fn(f: F) -> Self {
-        Self::new(FnMutProducer(f))
+    pub fn from_fn(f: F) -> InfVec<T, FnMutProducer<F>> {
+        InfVec::new(FnMutProducer(f))
     }
 }
 
@@ -175,8 +175,8 @@ impl<I: Iterator> InfVec<I::Item, IteratorProducer<I>> {
     /// Creates a new `InfVec` from an iterator, conceptually containing the
     /// stream of elements produced by the iterator. Operations on the resulting
     /// `InfVec` might panic if the iterator is not infinite.
-    pub fn from_infinite_iter(iter: I) -> Self {
-        Self::new(IteratorProducer(iter))
+    pub fn from_infinite_iter(iter: I) -> InfVec<I::Item, IteratorProducer<I>> {
+        InfVec::new(IteratorProducer(iter))
     }
 }
 
@@ -184,16 +184,16 @@ impl<T> InfVecBoxed<T> {
     /// Creates an [`InfVecBoxed`] from a closure. The function boxes the
     /// closure for you. The resulting `InfVecBoxed` is conceptually initialized
     /// by values from successive calls to the closure.
-    pub fn boxed_from_fn(f: impl FnMut() -> T + 'static) -> Self {
-        Self::new(Box::new(FnMutProducer(f)))
+    pub fn boxed_from_fn(f: impl FnMut() -> T + 'static) -> InfVecBoxed<T> {
+        InfVecBoxed::new(Box::new(FnMutProducer(f)))
     }
 
     /// Creates an [`InfVecBoxed`] from an iterator. The function boxes the
     /// iterator for you. The resulting `InfVec` conceptually contains the
     /// stream of elements produced by the iterator. Operations on the resulting
     /// `InfVecBoxed` might panic if the iterator is not infinite.
-    pub fn boxed_from_infinite_iter(iter: impl Iterator<Item = T> + 'static) -> Self {
-        Self::new(Box::new(IteratorProducer(iter)))
+    pub fn boxed_from_infinite_iter(iter: impl Iterator<Item = T> + 'static) -> InfVecBoxed<T> {
+        InfVecBoxed::new(Box::new(IteratorProducer(iter)))
     }
 }
 
@@ -235,7 +235,7 @@ impl<T, P> Debug for InfVec<T, P> {
 }
 
 impl<T, P> Clone for InfVec<T, P> {
-    fn clone(&self) -> Self {
+    fn clone(&self) -> InfVec<T, P> {
         todo!()
     }
 }
