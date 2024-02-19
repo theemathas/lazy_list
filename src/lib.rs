@@ -1,3 +1,5 @@
+//! See the documentation for [`InfVec`] for usage information.
+
 use std::{
     array,
     cell::RefCell,
@@ -12,7 +14,8 @@ const CHUNK_SIZE: usize = 64;
 
 // TODO Cargo.toml
 
-// TODO docs
+/// A trait for types that can produce an infinite stream of elements of type
+/// `T`.
 pub trait Producer<T> {
     fn produce(&mut self) -> T;
 }
@@ -29,7 +32,7 @@ impl<T, P: Producer<T> + ?Sized> Producer<T> for Box<P> {
     }
 }
 
-// TODO docs
+/// A [`Producer`] that produces elements by repeatedly calling a closure.
 pub struct FnMutProducer<F>(pub F);
 
 impl<T, F: FnMut() -> T> Producer<T> for FnMutProducer<F> {
@@ -38,7 +41,8 @@ impl<T, F: FnMut() -> T> Producer<T> for FnMutProducer<F> {
     }
 }
 
-// TODO docs
+/// A [`Producer`] that produces elements from an iterator which is assumed to
+/// be infinite. Panics if the iterator runs out of elements.
 pub struct IteratorProducer<I>(pub I);
 
 impl<I: Iterator> Producer<I::Item> for IteratorProducer<I> {
@@ -63,6 +67,11 @@ impl<I: Iterator> Producer<I::Item> for IteratorProducer<I> {
 ///
 /// `InfVec` is currently not thread-safe. It is also invariant, as opposed to
 /// covariant.
+///
+/// Despite the name, `InfVec` doesn't actually store elements continuously like
+/// a `Vec`. Instead, it stores elements in 64-element chunks. This is so that
+/// we can hand out references to elements, and not have them be invalidated as
+/// more elements are added to the cache.
 pub struct InfVec<T, P>(RefCell<InfVecInner<T, P>>);
 
 // TODO docs
