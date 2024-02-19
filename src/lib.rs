@@ -4,6 +4,7 @@ use std::{
     array,
     cell::RefCell,
     fmt::{self, Debug},
+    marker::PhantomData,
     mem::MaybeUninit,
     ops::{Index, IndexMut},
     ptr::NonNull,
@@ -75,7 +76,7 @@ impl<I: Iterator> Producer<I::Item> for IteratorProducer<I> {
 ///
 /// If you don't want to specify a producer type as a type parameter, you can
 /// use the [`InfVecBoxed`] type alias.
-pub struct InfVec<T, P>(RefCell<InfVecInner<T, P>>);
+pub struct InfVec<T, P>(RefCell<InfVecInner<T, P>>, PhantomData<(Vec<T>, P)>);
 
 /// A type alias for an [`InfVec`] with a boxed [`Producer`] for convenience.
 pub type InfVecBoxed<T> = InfVec<T, Box<dyn Producer<T> + 'static>>;
@@ -150,11 +151,14 @@ impl<T, P> InfVec<T, P> {
     /// is conceptually initialized by values from successive calls to
     /// [produce](Producer::produce).
     pub const fn new(producer: P) -> InfVec<T, P> {
-        InfVec(RefCell::new(InfVecInner {
-            cached_chunks: Vec::new(),
-            num_cached: 0,
-            producer,
-        }))
+        InfVec(
+            RefCell::new(InfVecInner {
+                cached_chunks: Vec::new(),
+                num_cached: 0,
+                producer,
+            }),
+            PhantomData,
+        )
     }
 
     /// Returns the number of elements that have been produced and cached so far.
@@ -181,14 +185,14 @@ impl<I: Iterator> InfVec<I::Item, IteratorProducer<I>> {
 }
 
 impl<T> InfVecBoxed<T> {
-    /// Creates an [`InfVecBoxed`] from a closure. The function boxes the
+    /// Creates an [`InfVecBoxed`] from a closure. This method boxes the
     /// closure for you. The resulting `InfVecBoxed` is conceptually initialized
     /// by values from successive calls to the closure.
     pub fn boxed_from_fn(f: impl FnMut() -> T + 'static) -> InfVecBoxed<T> {
         InfVecBoxed::new(Box::new(FnMutProducer(f)))
     }
 
-    /// Creates an [`InfVecBoxed`] from an iterator. The function boxes the
+    /// Creates an [`InfVecBoxed`] from an iterator. This method boxes the
     /// iterator for you. The resulting `InfVec` conceptually contains the
     /// stream of elements produced by the iterator. Operations on the resulting
     /// `InfVecBoxed` might panic if the iterator is not infinite.
