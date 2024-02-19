@@ -105,6 +105,10 @@ struct InfVecInner<T, P> {
     producer: P,
 }
 
+// SAFETY: We don't rely on everything being in one thread. We don't have `Sync`
+// though.
+unsafe impl<T: Send, P: Send> Send for InfVec<T, P> {}
+
 impl<T, P> Drop for InfVec<T, P> {
     fn drop(&mut self) {
         let mut inner = self.0.borrow_mut();
