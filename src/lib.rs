@@ -25,7 +25,8 @@ const CHUNK_SIZE: usize = 64;
 
 // TODO map, filter, etc.
 
-/// An infinite `Vec`-like data structure. The main type of this crate.
+/// A lazily-populated infinite `Vec`-like data structure, the main type of
+/// this crate.
 ///
 /// An `InfVec<T, P>` contains infinitely many values of type `T`.  It can be
 /// iterated over and indexed into similarly to a `Vec`. Elements are produced
