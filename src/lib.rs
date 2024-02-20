@@ -15,6 +15,8 @@ const CHUNK_SIZE: usize = 64;
 
 // TODO Cargo.toml
 
+// TODO figure out clone
+
 /// A trait for types that can produce an infinite stream of elements of type
 /// `T`.
 pub trait Producer<T> {
@@ -34,6 +36,7 @@ impl<T, P: Producer<T> + ?Sized> Producer<T> for Box<P> {
 }
 
 /// A [`Producer`] that produces elements by repeatedly calling a closure.
+#[derive(Debug)]
 pub struct FnMutProducer<F>(pub F);
 
 impl<T, F: FnMut() -> T> Producer<T> for FnMutProducer<F> {
@@ -44,6 +47,7 @@ impl<T, F: FnMut() -> T> Producer<T> for FnMutProducer<F> {
 
 /// A [`Producer`] that produces elements from an iterator which is assumed to
 /// be infinite. Panics if the iterator runs out of elements.
+#[derive(Debug)]
 pub struct IteratorProducer<I>(pub I);
 
 impl<I: Iterator> Producer<I::Item> for IteratorProducer<I> {
@@ -109,7 +113,7 @@ struct InfVecInner<T, P> {
 /// Iterator over immutable references to the elements of an [`InfVec`].
 ///
 /// This struct is created by the [`iter`](InfVec::iter) method on [`InfVec`].
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Iter<'a, T, P> {
     vec: &'a InfVec<T, P>,
     index: usize,
@@ -367,18 +371,6 @@ impl<'a, T, P: Producer<T>> IntoIterator for &'a mut InfVec<T, P> {
     }
 }
 
-impl<T, P> Debug for InfVec<T, P> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
-    }
-}
-
-impl<T, P> Clone for InfVec<T, P> {
-    fn clone(&self) -> InfVec<T, P> {
-        todo!()
-    }
-}
-
 impl<'a, T, P: Producer<T>> Iterator for Iter<'a, T, P> {
     type Item = &'a T;
 
@@ -417,6 +409,28 @@ impl<T, P: Producer<T>> Iterator for IntoIter<T, P> {
         } else {
             Some(inner.producer.produce())
         }
+    }
+}
+
+impl<T: Debug, P> Debug for InfVec<T, P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Hack until DebugList::entries is stabilized
+        struct DebugEllipsis;
+        impl Debug for DebugEllipsis {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("...")
+            }
+        }
+
+        let inner = self.0.borrow();
+        f.debug_list()
+            .entries((0..inner.num_cached).map(|i| unsafe {
+                // SAFETY: Elements in the range `0..num_cached` are
+                // initialized.
+                (*inner.index_ptr(i)).assume_init_ref()
+            }))
+            .entry(&DebugEllipsis)
+            .finish()
     }
 }
 
@@ -541,5 +555,17 @@ mod tests {
         // Dropping the `into_iter` should deallocate the cached elements.
         drop(into_iter);
         assert_eq!(drop_counter.load(std::sync::atomic::Ordering::Relaxed), 200);
+    }
+
+    #[test]
+    fn test_debug() {
+        let mut x = 0;
+        let vec = InfVec::from_fn(move || {
+            x += 1;
+            x
+        });
+        assert_eq!(format!("{:?}", vec), "[...]");
+        vec[9];
+        assert_eq!(format!("{:?}", vec), "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ...]");
     }
 }
