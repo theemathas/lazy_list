@@ -179,9 +179,9 @@ impl<T, P> InfVecInner<T, P> {
 }
 
 impl<T, P> InfVec<T, P> {
-    /// Creates a new `InfVec` with the given producer. The resulting `InfVec`
-    /// is conceptually initialized by values from successive calls to
-    /// [produce](Producer::produce).
+    /// Creates a new `InfVec` with the given [`Producer`]. The resulting
+    /// `InfVec` is conceptually initialized by values from successive calls to
+    /// [`produce`](Producer::produce).
     pub const fn new(producer: P) -> InfVec<T, P> {
         InfVec(
             RefCell::new(InfVecInner {
