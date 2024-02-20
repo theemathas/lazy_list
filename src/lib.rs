@@ -17,13 +17,10 @@ use std::{
 /// Number of elements in a chunk in the cache
 const CHUNK_SIZE: usize = 64;
 
-// TODO Cargo.toml
-
 // TODO figure out clone (for InfVec and for producers)
-
 // TODO more docs
-
 // TODO map, filter, etc.
+// TODO Debug impl for iterator
 
 /// A lazily-populated infinite `Vec`-like data structure, the main type of
 /// this crate.
@@ -79,7 +76,6 @@ struct InfVecInner<T, P> {
 /// Iterator over immutable references to the elements of an [`InfVec`].
 ///
 /// This struct is created by the [`iter`](InfVec::iter) method on [`InfVec`].
-#[derive(Debug)]
 pub struct Iter<'a, T, P> {
     vec: &'a InfVec<T, P>,
     index: usize,
@@ -89,13 +85,11 @@ pub struct Iter<'a, T, P> {
 ///
 /// This struct is created by the [`iter_mut`](InfVec::iter_mut) method on
 /// [`InfVec`].
-#[derive(Debug)]
 pub struct IterMut<'a, T, P> {
     vec: &'a mut InfVec<T, P>,
     index: usize,
 }
 
-// TODO Debug impl
 /// Iterator that moves elements out of an [`InfVec`].
 ///
 /// This struct is created by the `into_iter` method on [`InfVec`].
