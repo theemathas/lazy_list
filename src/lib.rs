@@ -83,7 +83,9 @@ impl<I: Iterator> Producer<I::Item> for IteratorProducer<I> {
 pub struct InfVec<T, P>(RefCell<InfVecInner<T, P>>, PhantomData<(Vec<T>, P)>);
 
 /// A type alias for an [`InfVec`] with a boxed [`Producer`] for convenience.
-pub type InfVecBoxed<T> = InfVec<T, Box<dyn Producer<T> + 'static>>;
+///
+/// In most cases, `InfVecBoxed<'static, T>` is the type you want.
+pub type InfVecBoxed<'a, T> = InfVec<T, Box<dyn Producer<T> + 'a>>;
 
 type Chunk<T> = NonNull<[MaybeUninit<T>; CHUNK_SIZE]>;
 
@@ -250,11 +252,11 @@ impl<I: Iterator> InfVec<I::Item, IteratorProducer<I>> {
     }
 }
 
-impl<T> InfVecBoxed<T> {
+impl<'a, T> InfVecBoxed<'a, T> {
     /// Creates an [`InfVecBoxed`] from a closure. This method boxes the
     /// closure for you. The resulting `InfVecBoxed` is conceptually initialized
     /// by values from successive calls to the closure.
-    pub fn boxed_from_fn(f: impl FnMut() -> T + 'static) -> InfVecBoxed<T> {
+    pub fn boxed_from_fn(f: impl FnMut() -> T + 'a) -> InfVecBoxed<'a, T> {
         InfVecBoxed::new(Box::new(FnMutProducer(f)))
     }
 
@@ -262,7 +264,7 @@ impl<T> InfVecBoxed<T> {
     /// iterator for you. The resulting `InfVec` conceptually contains the
     /// stream of elements produced by the iterator. Operations on the resulting
     /// `InfVecBoxed` might panic if the iterator is not infinite.
-    pub fn boxed_from_infinite_iter(iter: impl Iterator<Item = T> + 'static) -> InfVecBoxed<T> {
+    pub fn boxed_from_infinite_iter(iter: impl Iterator<Item = T> + 'a) -> InfVecBoxed<'a, T> {
         InfVecBoxed::new(Box::new(IteratorProducer(iter)))
     }
 }
@@ -464,7 +466,7 @@ mod tests {
     #[test]
     fn test_boxed_from_fn() {
         let mut x = 0;
-        let vec: InfVecBoxed<_> = InfVecBoxed::boxed_from_fn(move || {
+        let vec: InfVecBoxed<'_, _> = InfVecBoxed::boxed_from_fn(move || {
             x += 1;
             x
         });
@@ -475,7 +477,7 @@ mod tests {
 
     #[test]
     fn test_boxed_from_infinite_iter() {
-        let vec: InfVecBoxed<_> = InfVecBoxed::boxed_from_infinite_iter((0..).map(|x| x * x));
+        let vec: InfVecBoxed<'_, _> = InfVecBoxed::boxed_from_infinite_iter((0..).map(|x| x * x));
         for i in 0..100 {
             assert_eq!(vec[i], i * i);
         }
