@@ -5,7 +5,7 @@ use std::{
     cell::RefCell,
     fmt::{self, Debug},
     marker::PhantomData,
-    mem::MaybeUninit,
+    mem::{transmute, MaybeUninit},
     ops::{Index, IndexMut},
     ptr::NonNull,
 };
@@ -56,7 +56,6 @@ impl<I: Iterator> Producer<I::Item> for IteratorProducer<I> {
 
 // TODO more docs
 
-// TODO iterators
 // TODO map, filter, etc.
 
 /// An infinite `Vec`-like data structure. The main type of this crate.
@@ -64,7 +63,8 @@ impl<I: Iterator> Producer<I::Item> for IteratorProducer<I> {
 /// An `InfVec<T, P>` contains infinitely many values of type `T`.  It can be
 /// iterated over and indexed into similarly to a `Vec`. Elements are produced
 /// on-demand by a [`Producer`] with type `P` which is specified upon creation
-/// of the `InfVec`.
+/// of the `InfVec`. The elements can be later accessed by index, and can be
+/// modified.
 ///
 /// `InfVec` is currently not thread-safe. It is also invariant, as opposed to
 /// covariant.
@@ -84,11 +84,12 @@ pub type InfVecBoxed<T> = InfVec<T, Box<dyn Producer<T> + 'static>>;
 type Chunk<T> = NonNull<[MaybeUninit<T>; CHUNK_SIZE]>;
 
 /// SAFETY invariant: Each chunk points to is a valid allocation, and the first
-/// `cached_len` `T` elements of `cached_chunks` are initialized.
+/// `cached_len` `T` elements of `cached_chunks` are initialized. (Exception:
+/// the "must be initialized" invariant doesn't apply when `InfVec` is inside an
+/// `IntoIter`.)
 ///
-/// Invariant when panics do not occur: After the first `cached_len` elements,
-/// the remaining elements are uninitialized. Additionally, the last chunk in
-/// `cached_chunk` has at least one initialized element.
+/// Non-safety invariant when panics do not occur: After the first `cached_len`
+/// elements, the remaining elements are uninitialized.
 struct InfVecInner<T, P> {
     /// The elements that have been produced so far and cached. The i'th cached
     /// element is at `cached_chunks[i / CHUNK_SIZE][i % CHUNK_SIZE]`.
@@ -103,6 +104,36 @@ struct InfVecInner<T, P> {
     /// The producer of elements, which will be called to acquire elements that
     /// haven't been cached yet.
     producer: P,
+}
+
+/// Iterator over immutable references to the elements of an [`InfVec`].
+///
+/// This struct is created by the [`iter`](InfVec::iter) method on [`InfVec`].
+#[derive(Debug, Clone)]
+pub struct Iter<'a, T, P> {
+    vec: &'a InfVec<T, P>,
+    index: usize,
+}
+
+/// Iterator over mutable references to the elements of an [`InfVec`].
+///
+/// This struct is created by the [`iter_mut`](InfVec::iter_mut) method on
+/// [`InfVec`].
+#[derive(Debug)]
+pub struct IterMut<'a, T, P> {
+    vec: &'a mut InfVec<T, P>,
+    index: usize,
+}
+
+// TODO Debug impl
+/// Iterator that moves elements out of an [`InfVec`].
+///
+/// This struct is created by the `into_iter` method on [`InfVec`].
+pub struct IntoIter<T, P> {
+    // SAFETY invariant: Instead of `InfVec` having elements `0..num_cached`
+    // initialized, this one has elements `index..num_cached` initialized.
+    vec: InfVec<T, P>,
+    index: usize,
 }
 
 // SAFETY: We don't rely on everything being in one thread. We don't have `Sync`
@@ -121,7 +152,34 @@ impl<T, P> Drop for InfVec<T, P> {
                 inner.cached_chunks[i / CHUNK_SIZE].as_mut()[i % CHUNK_SIZE].assume_init_drop();
             }
         }
-        for chunk in &inner.cached_chunks {
+        for chunk in inner.cached_chunks.drain(..) {
+            // Drop each chunk
+            unsafe {
+                drop(Box::from_raw(chunk.as_ptr()));
+            }
+        }
+    }
+}
+
+impl<T, P> Drop for IntoIter<T, P> {
+    fn drop(&mut self) {
+        let mut inner = self.vec.0.borrow_mut();
+
+        // Reset the InfVec to have no cached elements, so that its drop impl
+        // doesn't drop any of the `T` elements, even if panics happen.
+        let actual_num_cached = inner.num_cached;
+        inner.num_cached = 0;
+
+        // SAFETY: Only drops initialized elements as per the invariant of
+        // `InfVecInner`. If any element's destructor panics, nothing else is
+        // dropped.
+        for i in self.index..actual_num_cached {
+            // Drop each element
+            unsafe {
+                inner.cached_chunks[i / CHUNK_SIZE].as_mut()[i % CHUNK_SIZE].assume_init_drop();
+            }
+        }
+        for chunk in inner.cached_chunks.drain(..) {
             // Drop each chunk
             unsafe {
                 drop(Box::from_raw(chunk.as_ptr()));
@@ -205,6 +263,33 @@ impl<T> InfVecBoxed<T> {
     }
 }
 
+impl<T, P: Producer<T>> Index<usize> for InfVec<T, P> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &T {
+        self.ensure_cached(index);
+        let guard = self.0.borrow();
+        let inner = &*guard;
+        // SAFETY: `ensure_cached` already ensures that the given element is
+        // initialized. Additionally, pushing a new chunk does not invalidate
+        // references to existing chunks.
+        unsafe { (*inner.index_ptr(index)).assume_init_ref() }
+    }
+}
+
+impl<T, P: Producer<T>> IndexMut<usize> for InfVec<T, P> {
+    fn index_mut(&mut self, index: usize) -> &mut T {
+        self.ensure_cached(index);
+        let mut guard = self.0.borrow_mut();
+        let inner = &mut *guard;
+        // SAFETY: `ensure_cached` already ensures that the given element is
+        // initialized. Additionally, pushing a new chunk does not invalidate
+        // references to existing chunks. And we have a mutable reference to
+        // self, so we can't have any other references to the same data.
+        unsafe { (*inner.index_ptr_mut(index)).assume_init_mut() }
+    }
+}
+
 impl<T, P: Producer<T>> InfVec<T, P> {
     /// Ensures that element `i` is cached.
     fn ensure_cached(&self, i: usize) {
@@ -234,6 +319,52 @@ impl<T, P: Producer<T>> InfVec<T, P> {
             inner.num_cached += 1;
         }
     }
+
+    /// Returns an infinite iterator over the elements of the `InfVec`.
+    pub fn iter(&self) -> Iter<T, P> {
+        Iter {
+            vec: self,
+            index: 0,
+        }
+    }
+
+    /// Returns a mutable infinite iterator over the elements of the `InfVec`.
+    pub fn iter_mut(&mut self) -> IterMut<T, P> {
+        IterMut {
+            vec: self,
+            index: 0,
+        }
+    }
+}
+
+impl<T, P: Producer<T>> IntoIterator for InfVec<T, P> {
+    type Item = T;
+    type IntoIter = IntoIter<T, P>;
+
+    fn into_iter(self) -> IntoIter<T, P> {
+        IntoIter {
+            vec: self,
+            index: 0,
+        }
+    }
+}
+
+impl<'a, T, P: Producer<T>> IntoIterator for &'a InfVec<T, P> {
+    type Item = &'a T;
+    type IntoIter = Iter<'a, T, P>;
+
+    fn into_iter(self) -> Iter<'a, T, P> {
+        self.iter()
+    }
+}
+
+impl<'a, T, P: Producer<T>> IntoIterator for &'a mut InfVec<T, P> {
+    type Item = &'a mut T;
+    type IntoIter = IterMut<'a, T, P>;
+
+    fn into_iter(self) -> IterMut<'a, T, P> {
+        self.iter_mut()
+    }
 }
 
 impl<T, P> Debug for InfVec<T, P> {
@@ -248,31 +379,52 @@ impl<T, P> Clone for InfVec<T, P> {
     }
 }
 
-impl<T, P: Producer<T>> Index<usize> for InfVec<T, P> {
-    type Output = T;
+impl<'a, T, P: Producer<T>> Iterator for Iter<'a, T, P> {
+    type Item = &'a T;
 
-    fn index(&self, index: usize) -> &T {
-        self.ensure_cached(index);
-        let guard = self.0.borrow();
-        let inner = &*guard;
-        // SAFETY: `ensure_cached` already ensures that the given element is initialized.
-        unsafe { (*inner.index_ptr(index)).assume_init_ref() }
+    fn next(&mut self) -> Option<&'a T> {
+        let result = &self.vec[self.index];
+        self.index += 1;
+        Some(result)
     }
 }
 
-impl<T, P: Producer<T>> IndexMut<usize> for InfVec<T, P> {
-    fn index_mut(&mut self, index: usize) -> &mut T {
-        self.ensure_cached(index);
-        let mut guard = self.0.borrow_mut();
-        let inner = &mut *guard;
-        // SAFETY: `ensure_cached` already ensures that the given element is initialized.
-        unsafe { (*inner.index_ptr_mut(index)).assume_init_mut() }
+impl<'a, T, P: Producer<T>> Iterator for IterMut<'a, T, P> {
+    type Item = &'a mut T;
+
+    fn next<'b>(&'b mut self) -> Option<&'a mut T> {
+        let result = &mut self.vec[self.index];
+        self.index += 1;
+        // SAFETY: the reference to the element existing does not depend on the
+        // the self reference existing.
+        unsafe { Some(transmute::<&'b mut T, &'a mut T>(result)) }
+    }
+}
+
+impl<T, P: Producer<T>> Iterator for IntoIter<T, P> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        let mut inner = self.vec.0.borrow_mut();
+        if self.index < inner.num_cached {
+            let result = unsafe {
+                // SAFETY: `index` is in bounds, and elements in the range
+                // `index..num_cached` are initialized.
+                inner.index_ptr(self.index).read().assume_init()
+            };
+            self.index += 1;
+            Some(result)
+        } else {
+            Some(inner.producer.produce())
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::sync::atomic::AtomicUsize;
 
     #[test]
     fn test_indexing() {
@@ -313,5 +465,81 @@ mod tests {
         for i in 0..100 {
             assert_eq!(vec[i], i * i);
         }
+    }
+
+    #[test]
+    fn test_iter() {
+        let mut x = 0;
+        let vec = InfVec::from_fn(move || {
+            x += 1;
+            x
+        });
+        let mut iter = vec.iter();
+        for i in 0..100 {
+            assert_eq!(iter.next(), Some(&(i + 1)));
+        }
+        let mut iter2 = vec.iter();
+        for i in 0..200 {
+            assert_eq!(iter2.next(), Some(&(i + 1)));
+        }
+        for i in 0..200 {
+            assert_eq!(iter.next(), Some(&(i + 101)));
+        }
+    }
+
+    #[test]
+    fn test_iter_mut() {
+        let mut x = 0;
+        let mut vec = InfVec::from_fn(move || {
+            x += 1;
+            x
+        });
+        let mut iter = vec.iter_mut();
+        for i in 0..100 {
+            let element_ref = iter.next().unwrap();
+            assert_eq!(element_ref, &mut (i + 1));
+            *element_ref += 1000;
+        }
+        let mut iter2 = vec.iter_mut();
+        for i in 0..100 {
+            assert_eq!(iter2.next(), Some(&mut (i + 1001)));
+        }
+        for i in 0..100 {
+            assert_eq!(iter2.next(), Some(&mut (i + 101)));
+        }
+    }
+
+    #[test]
+    fn test_into_iter() {
+        struct DropCounter<'a>(&'a AtomicUsize, usize);
+        impl Drop for DropCounter<'_> {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+
+        let drop_counter = AtomicUsize::new(0);
+        let drop_counter_ref = &drop_counter;
+        let mut x = 0;
+        let vec = InfVec::from_fn(move || {
+            x += 1;
+            DropCounter(drop_counter_ref, x)
+        });
+
+        let mut iter = vec.iter();
+        for _ in 0..200 {
+            // Fill the cache
+            iter.next();
+        }
+        let mut into_iter = vec.into_iter();
+        for i in 0..100 {
+            assert_eq!(into_iter.next().map(|x| x.1), Some(i + 1));
+        }
+
+        // Iterating through `into_iter` should consume the iterated elements.
+        assert_eq!(drop_counter.load(std::sync::atomic::Ordering::Relaxed), 100);
+        // Dropping the `into_iter` should deallocate the cached elements.
+        drop(into_iter);
+        assert_eq!(drop_counter.load(std::sync::atomic::Ordering::Relaxed), 200);
     }
 }
