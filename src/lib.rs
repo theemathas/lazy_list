@@ -96,6 +96,14 @@ impl<T, I> InfVec<T, I> {
     }
 }
 
+impl<T, F: FnMut() -> T> InfVec<T, iter::RepeatWith<F>> {
+    /// Creates an [`InfVec`] that conceptually contains elements from
+    /// successive calls to a given closure.
+    pub fn repeat_with(f: F) -> InfVec<T, iter::RepeatWith<F>> {
+        InfVec::new(iter::repeat_with(f))
+    }
+}
+
 impl<'a, T, I: Iterator<Item = T> + 'a> InfVec<T, I> {
     pub fn boxed(self) -> InfVecBoxed<'a, T> {
         InfVec {
