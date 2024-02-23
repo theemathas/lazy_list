@@ -27,8 +27,8 @@ pub struct ChunkedVec<T> {
     ///   running.
     /// * No references to the ChunkedVecInner or to the contents of the Vec
     ///   exist at any point.
-    /// * Any number of mutable or shared references to the contents of the Vec
-    ///   may exist, but they must obey the usual aliasing rules.
+    /// * Any number of mutable or shared references to the contents of the
+    ///   chunks may exist, but they must obey the usual aliasing rules.
     inner: UnsafeCell<ChunkedVecInner<T>>,
     _marker: PhantomData<Vec<T>>,
 }
