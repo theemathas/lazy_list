@@ -83,6 +83,8 @@ impl<T, I> InfVec<T, I> {
     /// conceptually contains the stream of elements produced by the iterator.
     /// Operations on the resulting `InfVec` might panic if the iterator is not
     /// infinite.
+    ///
+    /// Equivalent to [`IteratorInfExt::collect_inf`].
     pub const fn new(iterator: I) -> InfVec<T, I> {
         InfVec {
             cached: ChunkedVec::new(),
@@ -235,6 +237,19 @@ impl<T: Debug, I> Debug for InfVec<T, I> {
             }))
             .entry(&DebugEllipsis)
             .finish()
+    }
+}
+
+pub trait IteratorInfExt: Iterator + Sized {
+    /// Collects the elements of an iterator into an [`InfVec`]. If the iterator
+    /// isn't infinite, operations on the resulting `InfVec` might panic.
+    ///
+    /// Equivalent to [`InfVec::new`].
+    fn collect_inf<T>(self) -> InfVec<T, Self>;
+}
+impl<I: Iterator + Sized> IteratorInfExt for I {
+    fn collect_inf<T>(self) -> InfVec<T, Self> {
+        InfVec::new(self)
     }
 }
 
