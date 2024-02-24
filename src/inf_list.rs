@@ -165,14 +165,6 @@ impl<T, I> InfList<T, I> {
     }
 }
 
-impl<T, F: FnMut() -> T> InfList<T, iter::RepeatWith<F>> {
-    /// Creates an [`InfList`] that conceptually contains elements from
-    /// successive calls to a given closure.
-    pub fn repeat_with(f: F) -> InfList<T, iter::RepeatWith<F>> {
-        InfList::new(iter::repeat_with(f))
-    }
-}
-
 impl<'a, T: Send + Sync + 'a> InfListBoxed<'a, T> {
     /// Creates a recursive `InfList`. The closure should take a reference to the
     /// `InfList` itself and an index, then return the element at that index. The
