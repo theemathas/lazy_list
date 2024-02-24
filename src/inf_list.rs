@@ -41,7 +41,7 @@
 //!
 //! Reusing a static `InfList`:
 //! ```
-//! use lazy_list::{InfList, InfListOwned, IteratorInfExt};
+//! use lazy_list::{InfList, InfListOwned, IteratorLazyExt};
 //! use once_cell::sync::Lazy;
 //!
 //! // Note that each element will only ever be produced once.
@@ -151,7 +151,7 @@ impl<T, I> InfList<T, I> {
     /// Operations on the resulting `InfList` might panic if the iterator is not
     /// infinite.
     ///
-    /// Equivalent to [`IteratorInfExt::collect_inf`].
+    /// Equivalent to [`crate::IteratorLazyExt::collect_inf`].
     pub const fn new(iterator: I) -> InfList<T, I> {
         InfList {
             cached: ChunkedVec::new(),
@@ -329,23 +329,6 @@ impl<T: Debug, I> Debug for InfList<T, I> {
             }))
             .entry(&DebugEllipsis)
             .finish()
-    }
-}
-
-/// Extension trait for [`Iterator`].
-///
-/// This trait provides the [`collect_inf`] method, which is a method version of
-/// [`InfList::new`].
-pub trait IteratorInfExt: Iterator + Sized {
-    /// Collects the elements of an iterator into an [`InfList`]. If the iterator
-    /// isn't infinite, operations on the resulting `InfList` might panic.
-    ///
-    /// Equivalent to [`InfList::new`].
-    fn collect_inf<T>(self) -> InfList<T, Self>;
-}
-impl<I: Iterator + Sized> IteratorInfExt for I {
-    fn collect_inf<T>(self) -> InfList<T, Self> {
-        InfList::new(self)
     }
 }
 
