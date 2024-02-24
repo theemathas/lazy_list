@@ -50,7 +50,7 @@ pub struct InfVec<T, I> {
 /// borrow data with lifetime `'a`.
 ///
 /// In most cases, [`InfVecOwned`] is the type you want.
-pub type InfVecBoxed<'a, T> = InfVec<T, Box<dyn Iterator<Item = T> + 'a>>;
+pub type InfVecBoxed<'a, T> = InfVec<T, Box<dyn Iterator<Item = T> + Send + 'a>>;
 
 /// Type alias for an [`InfVec`] with an unknown iterator type, which has no
 /// borrowed data.
@@ -106,12 +106,12 @@ impl<T, F: FnMut() -> T> InfVec<T, iter::RepeatWith<F>> {
     }
 }
 
-impl<'a, T: 'a> InfVecBoxed<'a, T> {
+impl<'a, T: Send + Sync + 'a> InfVecBoxed<'a, T> {
     /// Creates a recursive `InfVec`. The closure should take a reference to the
     /// `InfVec` itself and an index, then return the element at that index. The
     /// closure should only attempt to access prior elements of the `InfVec`, or
     /// a deadlock will occur.
-    pub fn recursive<F: FnMut(&InfVecBoxed<'a, T>, usize) -> T + 'a>(
+    pub fn recursive<F: FnMut(&InfVecBoxed<'a, T>, usize) -> T + Send + 'a>(
         mut f: F,
     ) -> Arc<InfVecBoxed<'a, T>> {
         Arc::new_cyclic(|weak| {
@@ -121,7 +121,7 @@ impl<'a, T: 'a> InfVecBoxed<'a, T> {
     }
 }
 
-impl<'a, T, I: Iterator<Item = T> + 'a> InfVec<T, I> {
+impl<'a, T, I: Iterator<Item = T> + Send + 'a> InfVec<T, I> {
     pub fn boxed(self) -> InfVecBoxed<'a, T> {
         InfVec {
             cached: self.cached,
