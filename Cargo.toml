@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Tim (Theemathas) Chirananthavat <theemathas@gmail.com>"]
 description = "A lazily-populated infinite Vec-like data structure."
 license = "MIT"
-keywords = ["infinite", "data-structures", "iterator", "lazy"]
+keywords = ["infinite", "data-structures", "iterator", "lazy", "sequence"]
 categories = ["data-structures", "iterators", "caching"]
 # Don't publish yet. Also, make a repository link.
 publish = false

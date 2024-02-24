@@ -12,9 +12,7 @@ use std::{
 
 use chunked_vec::ChunkedVec;
 
-// TODO figure out clone
 // TODO more docs
-// TODO map, filter, etc.
 // TODO Debug impl for iterator
 
 const FINITE_ITERATOR_PANIC_MESSAGE: &str =
