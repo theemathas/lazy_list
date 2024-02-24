@@ -3,11 +3,11 @@
 mod chunked_vec;
 
 use std::{
-    cell::RefCell,
     fmt::{self, Debug},
     iter,
     mem::transmute,
     ops::{Index, IndexMut},
+    sync::Mutex,
 };
 
 use chunked_vec::ChunkedVec;
@@ -31,8 +31,8 @@ const FINITE_ITERATOR_PANIC_MESSAGE: &str =
 ///
 /// If the iterator is not infinite, operations on the `InfVec` might panic.
 ///
-/// `InfVec` is currently not thread-safe. It is also invariant, as opposed to
-/// covariant, if that matters to you.
+/// `InfVec` is currently invariant, as opposed to covariant, if that matters to
+/// you.
 ///
 /// Despite the name, `InfVec` doesn't actually store elements continuously like
 /// a `Vec`. Instead, it stores elements in 64-element chunks. This is so that
@@ -43,7 +43,7 @@ const FINITE_ITERATOR_PANIC_MESSAGE: &str =
 /// use the [`InfVecBoxed`] type alias.
 pub struct InfVec<T, I> {
     cached: ChunkedVec<T>,
-    remaining: RefCell<I>,
+    remaining: Mutex<I>,
 }
 
 /// Type alias for an [`InfVec`] with an unknown iterator type, which might
@@ -88,7 +88,7 @@ impl<T, I> InfVec<T, I> {
     pub const fn new(iterator: I) -> InfVec<T, I> {
         InfVec {
             cached: ChunkedVec::new(),
-            remaining: RefCell::new(iterator),
+            remaining: Mutex::new(iterator),
         }
     }
 
@@ -110,7 +110,7 @@ impl<'a, T, I: Iterator<Item = T> + 'a> InfVec<T, I> {
     pub fn boxed(self) -> InfVecBoxed<'a, T> {
         InfVec {
             cached: self.cached,
-            remaining: RefCell::new(Box::new(self.remaining.into_inner())),
+            remaining: Mutex::new(Box::new(self.remaining.into_inner().unwrap())),
         }
     }
 }
@@ -138,7 +138,11 @@ impl<T, I: Iterator<Item = T>> IndexMut<usize> for InfVec<T, I> {
 impl<T, I: Iterator<Item = T>> InfVec<T, I> {
     /// Ensures that element `index` is cached.
     fn ensure_cached(&self, index: usize) {
-        let mut guard = self.remaining.borrow_mut();
+        // Don't lock if the element is already cached.
+        if self.cached.len() > index {
+            return;
+        }
+        let mut guard = self.remaining.lock().unwrap();
         while self.cached.len() <= index {
             let element = guard.next().expect(FINITE_ITERATOR_PANIC_MESSAGE);
             self.cached.push(element);
@@ -167,7 +171,11 @@ impl<T, I: Iterator<Item = T>> IntoIterator for InfVec<T, I> {
     type IntoIter = IntoIter<T, I>;
 
     fn into_iter(self) -> IntoIter<T, I> {
-        IntoIter(self.cached.into_iter().chain(self.remaining.into_inner()))
+        IntoIter(
+            self.cached
+                .into_iter()
+                .chain(self.remaining.into_inner().unwrap()),
+        )
     }
 }
 
@@ -221,7 +229,7 @@ impl<T, I: Iterator<Item = T>> Iterator for IntoIter<T, I> {
 
 impl<T: Debug, I> Debug for InfVec<T, I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Hack until DebugList::entries is stabilized
+        // Hack until DebugList::entry_with is stabilized
         struct DebugEllipsis;
         impl Debug for DebugEllipsis {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

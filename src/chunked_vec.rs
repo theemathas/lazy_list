@@ -1,8 +1,12 @@
 use std::{
     array,
-    cell::UnsafeCell,
     marker::PhantomData,
     mem::{ManuallyDrop, MaybeUninit},
+    ptr::addr_of,
+    sync::{
+        atomic::{AtomicUsize, Ordering::SeqCst},
+        Mutex,
+    },
 };
 
 /// Number of elements in a chunk
@@ -23,19 +27,18 @@ pub struct ChunkedVec<T> {
     /// `len` elements of this `ChunkedVec` are initialized.
     ///
     /// SAFETY invariant:
-    /// * No references to the ChunkedVecInner exist except when a method is
-    ///   running.
-    /// * No references to the ChunkedVecInner or to the contents of the Vec
-    ///   exist at any point.
+    /// * No references to the ChunkedVecInner exist except as allowed by the
+    ///   mutex. Mutating the len field also requires holding the mutex lock.
+    /// * No references to the contents of the Vec exist at any point.
     /// * Any number of mutable or shared references to the contents of the
     ///   chunks may exist, but they must obey the usual aliasing rules.
-    inner: UnsafeCell<ChunkedVecInner<T>>,
+    inner: Mutex<ChunkedVecInner<T>>,
+    len: AtomicUsize,
     _marker: PhantomData<Vec<T>>,
 }
 
 struct ChunkedVecInner<T> {
     chunks: Vec<Chunk<T>>,
-    len: usize,
 }
 
 pub struct IntoIter<T> {
@@ -43,6 +46,7 @@ pub struct IntoIter<T> {
     /// initialized values are at indexes `current..len`, and there are no
     /// restrictions on when references to the `ChunkedVecInner` may exist.
     inner: ChunkedVecInner<T>,
+    len: AtomicUsize,
     current: usize,
 }
 
@@ -74,34 +78,31 @@ impl<T> ChunkedVec<T> {
     /// Creates a new, empty `ChunkedVec`.
     pub const fn new() -> Self {
         Self {
-            inner: UnsafeCell::new(ChunkedVecInner {
-                chunks: Vec::new(),
-                len: 0,
-            }),
+            inner: Mutex::new(ChunkedVecInner { chunks: Vec::new() }),
+            len: AtomicUsize::new(0),
             _marker: PhantomData,
         }
     }
 
     /// The number of elements in the `ChunkedVec`.
     pub fn len(&self) -> usize {
-        // SAFETY: No other references to the `ChunkedVecInner` exist.
-        unsafe { (*self.inner.get()).len }
+        self.len.load(SeqCst)
     }
 
     /// Appends an element to the end of the `ChunkedVec`.
     pub fn push(&self, value: T) {
         unsafe {
-            // SAFETY: No other references to the `ChunkedVecInner` exist.
-            let inner: &mut ChunkedVecInner<T> = &mut *self.inner.get();
+            // SAFETY: After locking, we gain mutable access to the len.
+            let mut inner = self.inner.lock().unwrap();
             // If capacity is full, add a new chunk
-            if inner.len == inner.chunks.len() * CHUNK_SIZE {
+            if self.len() == inner.chunks.len() * CHUNK_SIZE {
                 inner
                     .chunks
                     .push(Box::new(array::from_fn(|_| MaybeUninit::uninit())));
             }
-            let new_element: *mut MaybeUninit<T> = inner.index_ptr(inner.len);
+            let new_element: *mut MaybeUninit<T> = inner.index_ptr(self.len());
             new_element.write(MaybeUninit::new(value));
-            inner.len += 1;
+            self.len.fetch_add(1, SeqCst);
         }
     }
 
@@ -111,9 +112,8 @@ impl<T> ChunkedVec<T> {
     /// SAFETY: The caller must ensure that nobody is holding a mutable
     /// reference to this exact element.
     pub unsafe fn index(&self, index: usize) -> &T {
-        // SAFETY: No other references to the `ChunkedVecInner` exist.
-        let inner: &mut ChunkedVecInner<T> = &mut *self.inner.get();
-        assert!(index < inner.len, "index out of bounds");
+        assert!(index < self.len(), "index out of bounds");
+        let mut inner = self.inner.lock().unwrap();
         let ptr: *mut MaybeUninit<T> = inner.index_ptr(index);
         // SAFETY: This index is already initialized, and won't be moved.
         (*ptr).as_ptr().as_ref().unwrap()
@@ -126,9 +126,8 @@ impl<T> ChunkedVec<T> {
     /// this exact element.
     #[allow(clippy::mut_from_ref)]
     pub unsafe fn index_mut(&self, index: usize) -> &mut T {
-        // SAFETY: No other references to the `ChunkedVecInner` exist.
-        let inner: &mut ChunkedVecInner<T> = &mut *self.inner.get();
-        assert!(index < inner.len, "index out of bounds");
+        assert!(index < self.len(), "index out of bounds");
+        let mut inner = self.inner.lock().unwrap();
         let ptr: *mut MaybeUninit<T> = inner.index_ptr(index);
         // SAFETY: This index is already initialized, and won't be moved.
         (*ptr).as_mut_ptr().as_mut().unwrap()
@@ -141,11 +140,13 @@ impl<T> IntoIterator for ChunkedVec<T> {
     /// Returns an iterator that consumes the `ChunkedVec`.
     fn into_iter(self) -> IntoIter<T> {
         // SAFETY: No other references to the `ChunkedVecInner` exist.
+        let self_manually_drop = ManuallyDrop::new(self);
+        let mutex = unsafe { addr_of!(self_manually_drop.inner).read() };
+        let inner = mutex.into_inner().unwrap();
         unsafe {
-            let self_manually_drop = ManuallyDrop::new(self);
-            let inner_ptr: *mut ChunkedVecInner<T> = self_manually_drop.inner.get();
             IntoIter {
-                inner: inner_ptr.read(),
+                inner,
+                len: addr_of!(self_manually_drop.len).read(),
                 current: 0,
             }
         }
@@ -155,11 +156,10 @@ impl<T> IntoIterator for ChunkedVec<T> {
 impl<T> Drop for ChunkedVec<T> {
     fn drop(&mut self) {
         unsafe {
-            // SAFETY: No other references to the `ChunkedVecInner` exist.
-            let inner: &mut ChunkedVecInner<T> = &mut *self.inner.get();
+            let inner: &mut ChunkedVecInner<T> = &mut *self.inner.lock().unwrap();
             // SAFETY: We're dropping self already, so nobody else can have
             // references to things inside it.
-            for i in 0..inner.len {
+            for i in 0..self.len() {
                 (*inner.index_ptr(i)).assume_init_drop();
             }
         }
@@ -170,10 +170,9 @@ impl<T> Drop for ChunkedVec<T> {
 impl<T> Drop for IntoIter<T> {
     fn drop(&mut self) {
         unsafe {
-            // SAFETY: No other references to the `ChunkedVecInner` exist.
             // SAFETY: We're dropping self already, so nobody else can have
             // references to things inside it.
-            for i in self.current..self.inner.len {
+            for i in self.current..self.len.load(SeqCst) {
                 (*self.inner.index_ptr(i)).assume_init_drop();
             }
         }
@@ -184,7 +183,7 @@ impl<T> Drop for IntoIter<T> {
 impl<T> Iterator for IntoIter<T> {
     type Item = T;
     fn next(&mut self) -> Option<T> {
-        if self.current < self.inner.len {
+        if self.current < self.len.load(SeqCst) {
             let ptr = self.inner.index_ptr(self.current);
             self.current += 1;
             // SAFETY: The index is initialized, and incrementing the index
