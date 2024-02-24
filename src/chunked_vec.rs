@@ -156,7 +156,7 @@ impl<T> IntoIterator for ChunkedVec<T> {
 impl<T> Drop for ChunkedVec<T> {
     fn drop(&mut self) {
         unsafe {
-            let inner: &mut ChunkedVecInner<T> = &mut *self.inner.lock().unwrap();
+            let inner: &mut ChunkedVecInner<T> = &mut self.inner.lock().unwrap();
             // SAFETY: We're dropping self already, so nobody else can have
             // references to things inside it.
             for i in 0..self.len() {

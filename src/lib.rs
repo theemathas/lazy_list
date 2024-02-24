@@ -1,4 +1,5 @@
 #![warn(missing_docs)]
+#![allow(clippy::missing_panics_doc)]
 //! This crate provides [`InfVec`], A lazily-populated infinite `Vec`-like data
 //! structure.
 //!
