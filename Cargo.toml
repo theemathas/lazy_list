@@ -1,5 +1,5 @@
 [package]
-name = "infinite_vec"
+name = "inf_vec"
 version = "0.0.1"
 edition = "2021"
 authors = ["Tim (Theemathas) Chirananthavat <theemathas@gmail.com>"]
