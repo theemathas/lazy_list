@@ -3,7 +3,7 @@
 version = 3
 
 [[package]]
-name = "inf_vec"
+name = "lazy_list"
 version = "0.1.0"
 dependencies = [
  "once_cell",

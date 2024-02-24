@@ -1,14 +1,14 @@
 [package]
-name = "inf_vec"
+name = "lazy_list"
 version = "0.1.0"
 edition = "2021"
 authors = ["Tim (Theemathas) Chirananthavat <theemathas@gmail.com>"]
-description = "A lazily-populated infinite Vec-like data structure."
+description = "Lazily-populated lists, infinite or infinite"
 documentation = "https://docs.rs/inf_vec"
 readme = "README.md"
 repository = "https://github.com/theemathas/inf_vec/"
 license = "MIT"
-keywords = ["infinite", "data-structures", "iterator", "lazy", "sequence"]
+keywords = ["lazy", "data-structures", "iterator", "infinite"]
 categories = ["data-structures", "iterators", "caching"]
 
 [dependencies]

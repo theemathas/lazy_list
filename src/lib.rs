@@ -28,7 +28,7 @@
 //!
 //! Mutation of an `InfVec`:
 //! ```
-//! use inf_vec::InfVec;
+//! use lazy_list::InfVec;
 //!
 //! let mut inf_vec = InfVec::new(0..);
 //! assert_eq!(
@@ -44,7 +44,7 @@
 //!
 //! Reusing a static `InfVec`:
 //! ```
-//! use inf_vec::{InfVec, InfVecOwned, IteratorInfExt};
+//! use lazy_list::{InfVec, InfVecOwned, IteratorInfExt};
 //! use once_cell::sync::Lazy;
 //!
 //! // Note that each element will only ever be produced once.
@@ -71,7 +71,7 @@
 //!
 //! Recursive `InfVec`:
 //! ```
-//! use inf_vec::{InfVec, InfVecBoxed};
+//! use lazy_list::{InfVec, InfVecBoxed};
 //! use std::sync::Arc;
 //!
 //! let fibonacci: Arc<InfVecBoxed<i32>> = InfVec::recursive(|fibonacci_ref, i| {

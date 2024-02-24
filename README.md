@@ -1,6 +1,5 @@
-# inf_vec
+# lazy_list
 
-This is a Rust crate that provides the `InfVec` type, a lazily-populated
-infinite `Vec`-like data structure.
+This is a Rust crate that provides lazily-populated lists, both finite and infinite.
 
-See [the documentation](https://docs.rs/inf_vec) for usage info.
+See [the documentation](https://docs.rs/lazy_list) for usage info.
