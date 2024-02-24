@@ -7,7 +7,7 @@ use std::{
     iter,
     mem::transmute,
     ops::{Index, IndexMut},
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 
 use chunked_vec::ChunkedVec;
@@ -103,6 +103,21 @@ impl<T, F: FnMut() -> T> InfVec<T, iter::RepeatWith<F>> {
     /// successive calls to a given closure.
     pub fn repeat_with(f: F) -> InfVec<T, iter::RepeatWith<F>> {
         InfVec::new(iter::repeat_with(f))
+    }
+}
+
+impl<'a, T: 'a> InfVecBoxed<'a, T> {
+    /// Creates a recursive `InfVec`. The closure should take a reference to the
+    /// `InfVec` itself and an index, then return the element at that index. The
+    /// closure should only attempt to access prior elements of the `InfVec`, or
+    /// a deadlock will occur.
+    pub fn recursive<F: FnMut(&InfVecBoxed<'a, T>, usize) -> T + 'a>(
+        mut f: F,
+    ) -> Arc<InfVecBoxed<'a, T>> {
+        Arc::new_cyclic(|weak| {
+            let weak = weak.clone();
+            InfVec::new((0..).map(move |i| f(&weak.upgrade().unwrap(), i))).boxed()
+        })
     }
 }
 
@@ -383,5 +398,14 @@ mod tests {
         assert_eq!(format!("{:?}", vec), "[...]");
         vec[9];
         assert_eq!(format!("{:?}", vec), "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ...]");
+    }
+
+    #[test]
+    fn test_recursive() {
+        let evens = InfVec::recursive(|evens_ref, i| if i == 0 { 0 } else { evens_ref[i - 1] + 2 });
+        assert_eq!(
+            evens.iter().copied().take(10).collect::<Vec<_>>(),
+            [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]
+        );
     }
 }
