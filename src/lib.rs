@@ -1,4 +1,92 @@
-//! See the documentation for [`InfVec`] for usage information.
+#![warn(missing_docs)]
+//! This crate provides [`InfVec`], A lazily-populated infinite `Vec`-like data
+//! structure.
+//!
+//! An `InfVec<T, I>` contains infinitely many values of type `T`.  It can be
+//! iterated over and indexed into similarly to a `Vec`. Elements are produced
+//! on-demand by a iterator with type `I` which is specified upon creation of
+//! the `InfVec`. The elements can be later accessed by index, and can be
+//! modified.
+//!
+//! If the iterator is not infinite, operations on the `InfVec` might panic.
+//!
+//! `InfVec` is currently invariant, as opposed to covariant, if that matters to
+//! you.
+//!
+//! `InfVec` is thread-safe, so you can put it in `static` variables.
+//!
+//! Despite the name, `InfVec` doesn't actually store elements continuously like
+//! a `Vec`. Instead, it stores elements in 64-element chunks. This is so that
+//! we can hand out references to elements, and not have them be invalidated as
+//! more elements are added to the cache.
+//!
+//! If you don't want to specify an iterator type as a type parameter, you can
+//! use the [`InfVecBoxed`] or [`InfVecOwned`] type aliases.
+//!
+//! # Examples
+//!
+//! Mutation of an `InfVec`:
+//! ```
+//! use inf_vec::InfVec;
+//!
+//! let mut inf_vec = InfVec::new(0..);
+//! assert_eq!(
+//!     inf_vec.iter().take(10).copied().collect::<Vec<_>>(),
+//!     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+//! );
+//! inf_vec[3] = 100;
+//! assert_eq!(
+//!     inf_vec.iter().take(10).copied().collect::<Vec<_>>(),
+//!     [0, 1, 2, 100, 4, 5, 6, 7, 8, 9]
+//! );
+//! ```
+//!
+//! Reusing a static `InfVec`:
+//! ```
+//! use inf_vec::{InfVec, InfVecOwned, IteratorInfExt};
+//! use once_cell::sync::Lazy;
+//!
+//! // Note that each element will only ever be produced once.
+//! static EVENS: Lazy<InfVecOwned<i32>> =
+//!     Lazy::new(|| (0..).map(|x| x * 2).collect_inf().boxed());
+//!
+//! fn evens_with_property(mut predicate: impl FnMut(i32) -> bool) -> impl Iterator<Item = i32> {
+//!     EVENS.iter().copied().filter(move |&x| predicate(x))
+//! }
+//!
+//! assert_eq!(
+//!     evens_with_property(|x| x % 3 == 0)
+//!         .take(5)
+//!         .collect::<Vec<_>>(),
+//!     [0, 6, 12, 18, 24]
+//! );
+//! assert_eq!(
+//!     evens_with_property(|x| x % 5 == 0)
+//!         .take(5)
+//!         .collect::<Vec<_>>(),
+//!     [0, 10, 20, 30, 40]
+//! );
+//! ```
+//!
+//! Recursive `InfVec`:
+//! ```
+//! use inf_vec::{InfVec, InfVecBoxed};
+//! use std::sync::Arc;
+//!
+//! let fibonacci: Arc<InfVecBoxed<i32>> = InfVec::recursive(|fibonacci_ref, i| {
+//!     if i < 2 {
+//!         1
+//!     } else {
+//!         fibonacci_ref[i - 1] + fibonacci_ref[i - 2]
+//!     }
+//! });
+//! assert_eq!(
+//!     fibonacci.iter().take(10).copied().collect::<Vec<_>>(),
+//!     [1, 1, 2, 3, 5, 8, 13, 21, 34, 55]
+//! );
+//! ```
+
+// TODO: Debug impl for iterators
 
 mod chunked_vec;
 
@@ -12,33 +100,12 @@ use std::{
 
 use chunked_vec::ChunkedVec;
 
-// TODO more docs
-// TODO Debug impl for iterator
-
 const FINITE_ITERATOR_PANIC_MESSAGE: &str =
     "The iterator used to construct an InfVec should be infinite";
 
-/// A lazily-populated infinite `Vec`-like data structure, the main type of this
-/// crate.
+/// A lazily-populated infinite `Vec`-like data structure.
 ///
-/// An `InfVec<T, I>` contains infinitely many values of type `T`.  It can be
-/// iterated over and indexed into similarly to a `Vec`. Elements are produced
-/// on-demand by a iterator with type `I` which is specified upon creation of
-/// the `InfVec`. The elements can be later accessed by index, and can be
-/// modified.
-///
-/// If the iterator is not infinite, operations on the `InfVec` might panic.
-///
-/// `InfVec` is currently invariant, as opposed to covariant, if that matters to
-/// you.
-///
-/// Despite the name, `InfVec` doesn't actually store elements continuously like
-/// a `Vec`. Instead, it stores elements in 64-element chunks. This is so that
-/// we can hand out references to elements, and not have them be invalidated as
-/// more elements are added to the cache.
-///
-/// If you don't want to specify an iterator type as a type parameter, you can
-/// use the [`InfVecBoxed`] type alias.
+/// See the [crate-level documentation](crate) for more information.
 pub struct InfVec<T, I> {
     cached: ChunkedVec<T>,
     remaining: Mutex<I>,
@@ -47,11 +114,17 @@ pub struct InfVec<T, I> {
 /// Type alias for an [`InfVec`] with an unknown iterator type, which might
 /// borrow data with lifetime `'a`.
 ///
+/// This type can be constructed by manually boxing the iterator, or by calling
+/// [`InfVec::boxed`].
+///
 /// In most cases, [`InfVecOwned`] is the type you want.
 pub type InfVecBoxed<'a, T> = InfVec<T, Box<dyn Iterator<Item = T> + Send + 'a>>;
 
 /// Type alias for an [`InfVec`] with an unknown iterator type, which has no
 /// borrowed data.
+///
+/// This type can be constructed by manually boxing the iterator, or by calling
+/// [`InfVec::boxed`].
 pub type InfVecOwned<T> = InfVecBoxed<'static, T>;
 
 /// Iterator over immutable references to the elements of an [`InfVec`].
@@ -120,6 +193,8 @@ impl<'a, T: Send + Sync + 'a> InfVecBoxed<'a, T> {
 }
 
 impl<'a, T, I: Iterator<Item = T> + Send + 'a> InfVec<T, I> {
+    /// Returns a boxed version of the `InfVec`. This is useful when you don't
+    /// want to write out the iterator type as a type parameter.
     pub fn boxed(self) -> InfVecBoxed<'a, T> {
         InfVec {
             cached: self.cached,
@@ -261,6 +336,10 @@ impl<T: Debug, I> Debug for InfVec<T, I> {
     }
 }
 
+/// Extension trait for [`Iterator`].
+///
+/// This trait provides the [`collect_inf`] method, which is a method version of
+/// [`InfVec::new`].
 pub trait IteratorInfExt: Iterator + Sized {
     /// Collects the elements of an iterator into an [`InfVec`]. If the iterator
     /// isn't infinite, operations on the resulting `InfVec` might panic.

@@ -12,3 +12,6 @@ keywords = ["infinite", "data-structures", "iterator", "lazy", "sequence"]
 categories = ["data-structures", "iterators", "caching"]
 
 [dependencies]
+
+[dev-dependencies]
+once_cell = "~1.19.0"
