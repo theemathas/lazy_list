@@ -1,52 +1,51 @@
-//! This crate provides [`InfVec`], A lazily-populated infinite `Vec`-like data
-//! structure.
+//! This module provides [`InfList`], A lazily-populated infinite list.
 //!
-//! An `InfVec<T, I>` contains infinitely many values of type `T`.  It can be
+//! An `InfList<T, I>` contains infinitely many values of type `T`.  It can be
 //! iterated over and indexed into similarly to a `Vec`. Elements are produced
 //! on-demand by a iterator with type `I` which is specified upon creation of
-//! the `InfVec`. The elements can be later accessed by index, and can be
+//! the `InfList`. The elements can be later accessed by index, and can be
 //! modified.
 //!
-//! If the iterator is not infinite, operations on the `InfVec` might panic.
+//! If the iterator is not infinite, operations on the `InfList` might panic.
 //!
-//! `InfVec` is currently invariant, as opposed to covariant, if that matters to
-//! you.
+//! `InfList` is currently invariant, as opposed to covariant, if that matters
+//! to you.
 //!
-//! `InfVec` is thread-safe, so you can put it in `static` variables.
+//! An immutable `InfList` is thread-safe, so you can put it in `static`
+//! variables.
 //!
-//! Despite the name, `InfVec` doesn't actually store elements continuously like
-//! a `Vec`. Instead, it stores elements in 64-element chunks. This is so that
+//! Internally, `InfList` stores elements in 64-element chunks. This is so that
 //! we can hand out references to elements, and not have them be invalidated as
 //! more elements are added to the cache.
 //!
 //! If you don't want to specify an iterator type as a type parameter, you can
-//! use the [`InfVecBoxed`] or [`InfVecOwned`] type aliases.
+//! use the [`InfListBoxed`] or [`InfListOwned`] type aliases.
 //!
 //! # Examples
 //!
-//! Mutation of an `InfVec`:
+//! Mutation of an `InfList`:
 //! ```
-//! use lazy_list::InfVec;
+//! use lazy_list::InfList;
 //!
-//! let mut inf_vec = InfVec::new(0..);
+//! let mut list = InfList::new(0..);
 //! assert_eq!(
-//!     inf_vec.iter().take(10).copied().collect::<Vec<_>>(),
+//!     list.iter().take(10).copied().collect::<Vec<_>>(),
 //!     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 //! );
-//! inf_vec[3] = 100;
+//! list[3] = 100;
 //! assert_eq!(
-//!     inf_vec.iter().take(10).copied().collect::<Vec<_>>(),
+//!     list.iter().take(10).copied().collect::<Vec<_>>(),
 //!     [0, 1, 2, 100, 4, 5, 6, 7, 8, 9]
 //! );
 //! ```
 //!
-//! Reusing a static `InfVec`:
+//! Reusing a static `InfList`:
 //! ```
-//! use lazy_list::{InfVec, InfVecOwned, IteratorInfExt};
+//! use lazy_list::{InfList, InfListOwned, IteratorInfExt};
 //! use once_cell::sync::Lazy;
 //!
 //! // Note that each element will only ever be produced once.
-//! static EVENS: Lazy<InfVecOwned<i32>> =
+//! static EVENS: Lazy<InfListOwned<i32>> =
 //!     Lazy::new(|| (0..).map(|x| x * 2).collect_inf().boxed());
 //!
 //! fn evens_with_property(mut predicate: impl FnMut(i32) -> bool) -> impl Iterator<Item = i32> {
@@ -67,12 +66,12 @@
 //! );
 //! ```
 //!
-//! Recursive `InfVec`:
+//! Recursive `InfList`:
 //! ```
-//! use lazy_list::{InfVec, InfVecBoxed};
+//! use lazy_list::{InfList, InfListBoxed};
 //! use std::sync::Arc;
 //!
-//! let fibonacci: Arc<InfVecBoxed<i32>> = InfVec::recursive(|fibonacci_ref, i| {
+//! let fibonacci: Arc<InfListBoxed<i32>> = InfList::recursive(|fibonacci_ref, i| {
 //!     if i < 2 {
 //!         1
 //!     } else {
@@ -98,63 +97,63 @@ use std::{
 use crate::chunked_vec::{self, ChunkedVec};
 
 const FINITE_ITERATOR_PANIC_MESSAGE: &str =
-    "The iterator used to construct an InfVec should be infinite";
+    "The iterator used to construct an InfList should be infinite";
 
-/// A lazily-populated infinite `Vec`-like data structure.
+/// A lazily-populated infinite list.
 ///
-/// See the [module-level documentation](crate::inf_vec) for more information.
-pub struct InfVec<T, I> {
+/// See the [module-level documentation](crate::inf_list) for more information.
+pub struct InfList<T, I> {
     cached: ChunkedVec<T>,
     remaining: Mutex<I>,
 }
 
-/// Type alias for an [`InfVec`] with an unknown iterator type, which might
+/// Type alias for an [`InfList`] with an unknown iterator type, which might
 /// borrow data with lifetime `'a`.
 ///
 /// This type can be constructed by manually boxing the iterator, or by calling
-/// [`InfVec::boxed`].
+/// [`InfList::boxed`].
 ///
-/// In most cases, [`InfVecOwned`] is the type you want.
-pub type InfVecBoxed<'a, T> = InfVec<T, Box<dyn Iterator<Item = T> + Send + 'a>>;
+/// In most cases, [`InfListOwned`] is the type you want.
+pub type InfListBoxed<'a, T> = InfList<T, Box<dyn Iterator<Item = T> + Send + 'a>>;
 
-/// Type alias for an [`InfVec`] with an unknown iterator type, which has no
+/// Type alias for an [`InfList`] with an unknown iterator type, which has no
 /// borrowed data.
 ///
 /// This type can be constructed by manually boxing the iterator, or by calling
-/// [`InfVec::boxed`].
-pub type InfVecOwned<T> = InfVecBoxed<'static, T>;
+/// [`InfList::boxed`].
+pub type InfListOwned<T> = InfListBoxed<'static, T>;
 
-/// Iterator over immutable references to the elements of an [`InfVec`].
+/// Iterator over immutable references to the elements of an [`InfList`].
 ///
-/// This struct is created by the [`iter`](InfVec::iter) method on [`InfVec`].
+/// This struct is created by the [`iter`](InfList::iter) method on [`InfList`].
 pub struct Iter<'a, T, I> {
-    inf_vec: &'a InfVec<T, I>,
+    inf_list: &'a InfList<T, I>,
     index: usize,
 }
 
-/// Iterator over mutable references to the elements of an [`InfVec`].
+/// Iterator over mutable references to the elements of an [`InfList`].
 ///
-/// This struct is created by the [`iter_mut`](InfVec::iter_mut) method on
-/// [`InfVec`].
+/// This struct is created by the [`iter_mut`](InfList::iter_mut) method on
+/// [`InfList`].
 pub struct IterMut<'a, T, I> {
-    inf_vec: &'a mut InfVec<T, I>,
+    inf_list: &'a mut InfList<T, I>,
     index: usize,
 }
 
-/// Iterator that moves elements out of an [`InfVec`].
+/// Iterator that moves elements out of an [`InfList`].
 ///
-/// This struct is created by the `into_iter` method on [`InfVec`].
+/// This struct is created by the `into_iter` method on [`InfList`].
 pub struct IntoIter<T, I>(iter::Chain<chunked_vec::IntoIter<T>, I>);
 
-impl<T, I> InfVec<T, I> {
-    /// Creates an [`InfVec`] from an iterator. The resulting `InfVec`
+impl<T, I> InfList<T, I> {
+    /// Creates an [`InfList`] from an iterator. The resulting `InfList`
     /// conceptually contains the stream of elements produced by the iterator.
-    /// Operations on the resulting `InfVec` might panic if the iterator is not
+    /// Operations on the resulting `InfList` might panic if the iterator is not
     /// infinite.
     ///
     /// Equivalent to [`IteratorInfExt::collect_inf`].
-    pub const fn new(iterator: I) -> InfVec<T, I> {
-        InfVec {
+    pub const fn new(iterator: I) -> InfList<T, I> {
+        InfList {
             cached: ChunkedVec::new(),
             remaining: Mutex::new(iterator),
         }
@@ -166,41 +165,41 @@ impl<T, I> InfVec<T, I> {
     }
 }
 
-impl<T, F: FnMut() -> T> InfVec<T, iter::RepeatWith<F>> {
-    /// Creates an [`InfVec`] that conceptually contains elements from
+impl<T, F: FnMut() -> T> InfList<T, iter::RepeatWith<F>> {
+    /// Creates an [`InfList`] that conceptually contains elements from
     /// successive calls to a given closure.
-    pub fn repeat_with(f: F) -> InfVec<T, iter::RepeatWith<F>> {
-        InfVec::new(iter::repeat_with(f))
+    pub fn repeat_with(f: F) -> InfList<T, iter::RepeatWith<F>> {
+        InfList::new(iter::repeat_with(f))
     }
 }
 
-impl<'a, T: Send + Sync + 'a> InfVecBoxed<'a, T> {
-    /// Creates a recursive `InfVec`. The closure should take a reference to the
-    /// `InfVec` itself and an index, then return the element at that index. The
-    /// closure should only attempt to access prior elements of the `InfVec`, or
+impl<'a, T: Send + Sync + 'a> InfListBoxed<'a, T> {
+    /// Creates a recursive `InfList`. The closure should take a reference to the
+    /// `InfList` itself and an index, then return the element at that index. The
+    /// closure should only attempt to access prior elements of the `InfList`, or
     /// a deadlock will occur.
-    pub fn recursive<F: FnMut(&InfVecBoxed<'a, T>, usize) -> T + Send + 'a>(
+    pub fn recursive<F: FnMut(&InfListBoxed<'a, T>, usize) -> T + Send + 'a>(
         mut f: F,
-    ) -> Arc<InfVecBoxed<'a, T>> {
+    ) -> Arc<InfListBoxed<'a, T>> {
         Arc::new_cyclic(|weak| {
             let weak = weak.clone();
-            InfVec::new((0..).map(move |i| f(&weak.upgrade().unwrap(), i))).boxed()
+            InfList::new((0..).map(move |i| f(&weak.upgrade().unwrap(), i))).boxed()
         })
     }
 }
 
-impl<'a, T, I: Iterator<Item = T> + Send + 'a> InfVec<T, I> {
-    /// Returns a boxed version of the `InfVec`. This is useful when you don't
+impl<'a, T, I: Iterator<Item = T> + Send + 'a> InfList<T, I> {
+    /// Returns a boxed version of the `InfList`. This is useful when you don't
     /// want to write out the iterator type as a type parameter.
-    pub fn boxed(self) -> InfVecBoxed<'a, T> {
-        InfVec {
+    pub fn boxed(self) -> InfListBoxed<'a, T> {
+        InfList {
             cached: self.cached,
             remaining: Mutex::new(Box::new(self.remaining.into_inner().unwrap())),
         }
     }
 }
 
-impl<T, I: Iterator<Item = T>> Index<usize> for InfVec<T, I> {
+impl<T, I: Iterator<Item = T>> Index<usize> for InfList<T, I> {
     type Output = T;
 
     fn index(&self, index: usize) -> &T {
@@ -211,7 +210,7 @@ impl<T, I: Iterator<Item = T>> Index<usize> for InfVec<T, I> {
     }
 }
 
-impl<T, I: Iterator<Item = T>> IndexMut<usize> for InfVec<T, I> {
+impl<T, I: Iterator<Item = T>> IndexMut<usize> for InfList<T, I> {
     fn index_mut(&mut self, index: usize) -> &mut T {
         self.ensure_cached(index);
         // SAFETY: Exclusive reference to self ensures that no other references
@@ -220,7 +219,7 @@ impl<T, I: Iterator<Item = T>> IndexMut<usize> for InfVec<T, I> {
     }
 }
 
-impl<T, I: Iterator<Item = T>> InfVec<T, I> {
+impl<T, I: Iterator<Item = T>> InfList<T, I> {
     /// Ensures that element `index` is cached.
     fn ensure_cached(&self, index: usize) {
         // Don't lock if the element is already cached.
@@ -234,24 +233,24 @@ impl<T, I: Iterator<Item = T>> InfVec<T, I> {
         }
     }
 
-    /// Returns an infinite iterator over the elements of the `InfVec`.
+    /// Returns an infinite iterator over the elements of the `InfList`.
     pub fn iter(&self) -> Iter<T, I> {
         Iter {
-            inf_vec: self,
+            inf_list: self,
             index: 0,
         }
     }
 
-    /// Returns a mutable infinite iterator over the elements of the `InfVec`.
+    /// Returns a mutable infinite iterator over the elements of the `InfList`.
     pub fn iter_mut(&mut self) -> IterMut<T, I> {
         IterMut {
-            inf_vec: self,
+            inf_list: self,
             index: 0,
         }
     }
 }
 
-impl<T, I: Iterator<Item = T>> IntoIterator for InfVec<T, I> {
+impl<T, I: Iterator<Item = T>> IntoIterator for InfList<T, I> {
     type Item = T;
     type IntoIter = IntoIter<T, I>;
 
@@ -264,7 +263,7 @@ impl<T, I: Iterator<Item = T>> IntoIterator for InfVec<T, I> {
     }
 }
 
-impl<'a, T, I: Iterator<Item = T>> IntoIterator for &'a InfVec<T, I> {
+impl<'a, T, I: Iterator<Item = T>> IntoIterator for &'a InfList<T, I> {
     type Item = &'a T;
     type IntoIter = Iter<'a, T, I>;
 
@@ -273,7 +272,7 @@ impl<'a, T, I: Iterator<Item = T>> IntoIterator for &'a InfVec<T, I> {
     }
 }
 
-impl<'a, T, I: Iterator<Item = T>> IntoIterator for &'a mut InfVec<T, I> {
+impl<'a, T, I: Iterator<Item = T>> IntoIterator for &'a mut InfList<T, I> {
     type Item = &'a mut T;
     type IntoIter = IterMut<'a, T, I>;
 
@@ -286,7 +285,7 @@ impl<'a, T, I: Iterator<Item = T>> Iterator for Iter<'a, T, I> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<&'a T> {
-        let result = &self.inf_vec[self.index];
+        let result = &self.inf_list[self.index];
         self.index += 1;
         Some(result)
     }
@@ -296,7 +295,7 @@ impl<'a, T, I: Iterator<Item = T>> Iterator for IterMut<'a, T, I> {
     type Item = &'a mut T;
 
     fn next<'b>(&'b mut self) -> Option<&'a mut T> {
-        let result = &mut self.inf_vec[self.index];
+        let result = &mut self.inf_list[self.index];
         self.index += 1;
         // SAFETY: the reference to the element existing does not depend on the
         // the self reference existing.
@@ -312,7 +311,7 @@ impl<T, I: Iterator<Item = T>> Iterator for IntoIter<T, I> {
     }
 }
 
-impl<T: Debug, I> Debug for InfVec<T, I> {
+impl<T: Debug, I> Debug for InfList<T, I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Hack until DebugList::entry_with is stabilized
         struct DebugEllipsis;
@@ -336,17 +335,17 @@ impl<T: Debug, I> Debug for InfVec<T, I> {
 /// Extension trait for [`Iterator`].
 ///
 /// This trait provides the [`collect_inf`] method, which is a method version of
-/// [`InfVec::new`].
+/// [`InfList::new`].
 pub trait IteratorInfExt: Iterator + Sized {
-    /// Collects the elements of an iterator into an [`InfVec`]. If the iterator
-    /// isn't infinite, operations on the resulting `InfVec` might panic.
+    /// Collects the elements of an iterator into an [`InfList`]. If the iterator
+    /// isn't infinite, operations on the resulting `InfList` might panic.
     ///
-    /// Equivalent to [`InfVec::new`].
-    fn collect_inf<T>(self) -> InfVec<T, Self>;
+    /// Equivalent to [`InfList::new`].
+    fn collect_inf<T>(self) -> InfList<T, Self>;
 }
 impl<I: Iterator + Sized> IteratorInfExt for I {
-    fn collect_inf<T>(self) -> InfVec<T, Self> {
-        InfVec::new(self)
+    fn collect_inf<T>(self) -> InfList<T, Self> {
+        InfList::new(self)
     }
 }
 
@@ -359,44 +358,44 @@ mod tests {
     #[test]
     fn test_indexing() {
         let mut x = 0;
-        let mut vec = InfVec::new(iter::repeat_with(move || {
+        let mut list = InfList::new(iter::repeat_with(move || {
             x += 1;
             x
         }));
         for i in 0..100 {
-            assert_eq!(vec[i], i + 1);
+            assert_eq!(list[i], i + 1);
         }
         for i in 0..100 {
-            assert_eq!(vec[i], i + 1);
+            assert_eq!(list[i], i + 1);
         }
         for i in 0..200 {
-            vec[i] = 10 * i;
+            list[i] = 10 * i;
         }
         for i in 0..200 {
-            assert_eq!(vec[i], 10 * i);
+            assert_eq!(list[i], 10 * i);
         }
     }
 
     #[test]
     fn test_boxed_from_infinite_iter() {
-        let vec: InfVecBoxed<'_, _> = InfVec::new((0..).map(|x| x * x)).boxed();
+        let list: InfListBoxed<'_, _> = InfList::new((0..).map(|x| x * x)).boxed();
         for i in 0..100 {
-            assert_eq!(vec[i], i * i);
+            assert_eq!(list[i], i * i);
         }
     }
 
     #[test]
     fn test_iter() {
         let mut x = 0;
-        let vec = InfVec::new(iter::repeat_with(move || {
+        let list = InfList::new(iter::repeat_with(move || {
             x += 1;
             x
         }));
-        let mut iter = vec.iter();
+        let mut iter = list.iter();
         for i in 0..100 {
             assert_eq!(iter.next(), Some(&(i + 1)));
         }
-        let mut iter2 = vec.iter();
+        let mut iter2 = list.iter();
         for i in 0..200 {
             assert_eq!(iter2.next(), Some(&(i + 1)));
         }
@@ -408,17 +407,17 @@ mod tests {
     #[test]
     fn test_iter_mut() {
         let mut x = 0;
-        let mut vec = InfVec::new(iter::repeat_with(move || {
+        let mut list = InfList::new(iter::repeat_with(move || {
             x += 1;
             x
         }));
-        let mut iter = vec.iter_mut();
+        let mut iter = list.iter_mut();
         for i in 0..100 {
             let element_ref = iter.next().unwrap();
             assert_eq!(element_ref, &mut (i + 1));
             *element_ref += 1000;
         }
-        let mut iter2 = vec.iter_mut();
+        let mut iter2 = list.iter_mut();
         for i in 0..100 {
             assert_eq!(iter2.next(), Some(&mut (i + 1001)));
         }
@@ -439,17 +438,17 @@ mod tests {
         let drop_counter = AtomicUsize::new(0);
         let drop_counter_ref = &drop_counter;
         let mut x = 0;
-        let vec = InfVec::new(iter::repeat_with(move || {
+        let list = InfList::new(iter::repeat_with(move || {
             x += 1;
             DropCounter(drop_counter_ref, x)
         }));
 
-        let mut iter = vec.iter();
+        let mut iter = list.iter();
         for _ in 0..200 {
             // Fill the cache
             iter.next();
         }
-        let mut into_iter = vec.into_iter();
+        let mut into_iter = list.into_iter();
         for i in 0..100 {
             assert_eq!(into_iter.next().map(|x| x.1), Some(i + 1));
         }
@@ -465,18 +464,22 @@ mod tests {
     #[test]
     fn test_debug() {
         let mut x = 0;
-        let vec = InfVec::new(iter::repeat_with(move || {
+        let list = InfList::new(iter::repeat_with(move || {
             x += 1;
             x
         }));
-        assert_eq!(format!("{:?}", vec), "[...]");
-        vec[9];
-        assert_eq!(format!("{:?}", vec), "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ...]");
+        assert_eq!(format!("{:?}", list), "[...]");
+        list[9];
+        assert_eq!(
+            format!("{:?}", list),
+            "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ...]"
+        );
     }
 
     #[test]
     fn test_recursive() {
-        let evens = InfVec::recursive(|evens_ref, i| if i == 0 { 0 } else { evens_ref[i - 1] + 2 });
+        let evens =
+            InfList::recursive(|evens_ref, i| if i == 0 { 0 } else { evens_ref[i - 1] + 2 });
         assert_eq!(
             evens.iter().copied().take(10).collect::<Vec<_>>(),
             [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]
