@@ -103,7 +103,6 @@ mod chunked_vec;
 use std::{
     fmt::{self, Debug},
     iter,
-    mem::transmute,
     ops::{Index, IndexMut},
     option,
     sync::{Arc, Mutex},
@@ -142,7 +141,7 @@ pub type LazyListOwned<T> = LazyListBoxed<'static, T>;
 /// [`LazyList`].
 pub struct Iter<'a, T, I> {
     list: &'a LazyList<T, I>,
-    index: usize,
+    inner: chunked_vec::Iter<'a, T>,
 }
 
 /// Iterator over mutable references to the elements of a [`LazyList`].
@@ -150,8 +149,8 @@ pub struct Iter<'a, T, I> {
 /// This struct is created by the [`iter_mut`](LazyList::iter_mut) method on
 /// [`LazyList`].
 pub struct IterMut<'a, T, I> {
-    list: &'a mut LazyList<T, I>,
-    index: usize,
+    list: &'a LazyList<T, I>,
+    inner: chunked_vec::IterMut<'a, T>,
 }
 
 /// Iterator that moves elements out of an [`LazyList`].
@@ -275,7 +274,9 @@ impl<T, I: Iterator<Item = T>> LazyList<T, I> {
     pub fn iter(&self) -> Iter<T, I> {
         Iter {
             list: self,
-            index: 0,
+            // SAFETY: Shared reference to self ensures that no other mutable
+            // references to contents exist.
+            inner: unsafe { self.cached.iter() },
         }
     }
 
@@ -283,7 +284,9 @@ impl<T, I: Iterator<Item = T>> LazyList<T, I> {
     pub fn iter_mut(&mut self) -> IterMut<T, I> {
         IterMut {
             list: self,
-            index: 0,
+            // SAFETY: Exclusive reference to self ensure that no other
+            // references to contents exist.
+            inner: unsafe { self.cached.iter_mut() },
         }
     }
 }
@@ -323,9 +326,8 @@ impl<'a, T, I: Iterator<Item = T>> Iterator for Iter<'a, T, I> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<&'a T> {
-        let result = self.list.get(self.index);
-        self.index += 1;
-        result
+        self.list.ensure_cached(self.inner.next_index());
+        self.inner.next()
     }
 }
 
@@ -333,11 +335,8 @@ impl<'a, T, I: Iterator<Item = T>> Iterator for IterMut<'a, T, I> {
     type Item = &'a mut T;
 
     fn next<'b>(&'b mut self) -> Option<&'a mut T> {
-        let result = self.list.get_mut(self.index);
-        self.index += 1;
-        // SAFETY: the reference to the element existing does not depend on the
-        // the self reference existing.
-        unsafe { transmute::<Option<&'b mut T>, Option<&'a mut T>>(result) }
+        self.list.ensure_cached(self.inner.next_index());
+        self.inner.next()
     }
 }
 

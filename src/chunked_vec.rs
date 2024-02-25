@@ -41,6 +41,22 @@ struct ChunkedVecInner<T> {
     chunks: Vec<Chunk<T>>,
 }
 
+pub struct Iter<'a, T> {
+    chunked_vec: &'a ChunkedVec<T>,
+    next_index: usize,
+    /// SAFETY: This, if Some, is a valid pointer pointing to where the next
+    /// element would be if it existed.
+    next_ptr: Option<*const MaybeUninit<T>>,
+}
+
+pub struct IterMut<'a, T> {
+    chunked_vec: &'a ChunkedVec<T>,
+    next_index: usize,
+    /// SAFETY: This, if Some, is a valid pointer pointing to where the next
+    /// element would be if it existed.
+    next_ptr: Option<*mut MaybeUninit<T>>,
+}
+
 pub struct IntoIter<T> {
     /// Same as `ChunkedVec`, except that in the SAFETY invariant, the
     /// initialized values are at indexes `current..len`, and there are no
@@ -132,6 +148,30 @@ impl<T> ChunkedVec<T> {
         // SAFETY: This index is already initialized, and won't be moved.
         (*ptr).as_mut_ptr().as_mut().unwrap()
     }
+
+    /// Returns an iterator over the elements of the `ChunkedVec`.
+    ///
+    /// SAFETY: The caller must ensure that nobody is holding a mutable
+    /// reference to any element of the `ChunkedVec`.
+    pub unsafe fn iter(&self) -> Iter<'_, T> {
+        Iter {
+            chunked_vec: self,
+            next_index: 0,
+            next_ptr: None,
+        }
+    }
+
+    /// Returns a mutable iterator over the elements of the `ChunkedVec`.
+    ///
+    /// SAFETY: The caller must ensure that nobody is holding a reference to
+    /// any element of the `ChunkedVec`.
+    pub unsafe fn iter_mut(&self) -> IterMut<'_, T> {
+        IterMut {
+            chunked_vec: self,
+            next_index: 0,
+            next_ptr: None,
+        }
+    }
 }
 
 impl<T> IntoIterator for ChunkedVec<T> {
@@ -177,6 +217,75 @@ impl<T> Drop for IntoIter<T> {
             }
         }
         // The Vec and the chunks are automatically dropped.
+    }
+}
+
+impl<'a, T> Iter<'a, T> {
+    pub fn next_index(&self) -> usize {
+        self.next_index
+    }
+}
+
+impl<'a, T> Iterator for Iter<'a, T> {
+    type Item = &'a T;
+    fn next(&mut self) -> Option<&'a T> {
+        if self.next_index < self.chunked_vec.len() {
+            let current_ptr = self.next_ptr.unwrap_or_else(|| {
+                self.chunked_vec
+                    .inner
+                    .lock()
+                    .unwrap()
+                    .index_ptr(self.next_index)
+            });
+            self.next_index += 1;
+            self.next_ptr = if self.next_index % CHUNK_SIZE == 0 {
+                // End of the current chunk
+                None
+            } else {
+                // SAFETY: We're not at the end of the current chunk.
+                unsafe { Some(current_ptr.add(1)) }
+            };
+            // SAFETY: The client must ensure that nobody is holding a mutable
+            // reference to any element of the `ChunkedVec`.
+            Some(unsafe { &*current_ptr.cast::<T>() })
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a, T> IterMut<'a, T> {
+    pub fn next_index(&self) -> usize {
+        self.next_index
+    }
+}
+
+impl<'a, T> Iterator for IterMut<'a, T> {
+    type Item = &'a mut T;
+    fn next(&mut self) -> Option<&'a mut T> {
+        if self.next_index < self.chunked_vec.len() {
+            let current_ptr = self.next_ptr.unwrap_or_else(|| {
+                self.chunked_vec
+                    .inner
+                    .lock()
+                    .unwrap()
+                    .index_ptr(self.next_index)
+            });
+            self.next_index += 1;
+            self.next_ptr = if self.next_index % CHUNK_SIZE == 0 {
+                // End of the current chunk
+                None
+            } else {
+                // SAFETY: We're not at the end of the current chunk.
+                unsafe { Some(current_ptr.add(1)) }
+            };
+            // SAFETY: The client must ensure that nobody is holding a reference
+            // to any element of the `ChunkedVec`. And we increment stuff so
+            // this element isn't returned from this iterator again.
+            Some(unsafe { &mut *current_ptr.cast::<T>() })
+        } else {
+            None
+        }
     }
 }
 
@@ -243,6 +352,43 @@ mod tests {
         for i in 0..1000 {
             assert_eq!(*refs_vec[i], i);
         }
+    }
+
+    #[test]
+    fn test_iter() {
+        let vec = ChunkedVec::new();
+        for i in 0..1000 {
+            vec.push(i);
+        }
+        let mut iter = unsafe { vec.iter() };
+        for i in 0..1000 {
+            assert_eq!(iter.next(), Some(&i));
+        }
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_iter_mut() {
+        let vec = ChunkedVec::new();
+        for i in 0..1000 {
+            vec.push(i);
+        }
+        let mut iter = unsafe { vec.iter_mut() };
+        for i in 0..1000 {
+            assert_eq!(iter.next(), Some(&mut { i }));
+        }
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_iter_mut_always_near_end() {
+        let vec = ChunkedVec::new();
+        let mut iter = unsafe { vec.iter_mut() };
+        for i in 0..1000 {
+            vec.push(i);
+            assert_eq!(iter.next(), Some(&mut { i }));
+        }
+        assert_eq!(iter.next(), None);
     }
 
     #[test]
