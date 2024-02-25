@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Tim (Theemathas) Chirananthavat <theemathas@gmail.com>"]
 description = "Lazily-populated lists, finite or infinite"
-documentation = "https://docs.rs/inf_vec"
+documentation = "https://docs.rs/lazy_list"
 readme = "README.md"
-repository = "https://github.com/theemathas/inf_vec/"
+repository = "https://github.com/theemathas/lazy_list/"
 license = "MIT"
-keywords = ["lazy", "data-structures", "iterator", "infinite"]
+keywords = ["lazy", "data-structures", "iterator", "infinite", "cache"]
 categories = ["data-structures", "iterators", "caching"]
 
 [dependencies]
